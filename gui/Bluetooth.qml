@@ -13,12 +13,12 @@ Item {
 
     Component.onCompleted: {
         // Al cargar la pestaña, pedimos a Python que busque los dispositivos
-        networkBackend.request_status()
-        networkBackend.scan_networks()
+        bluetoothBackend.request_status()
+        bluetoothBackend.scan_networks()
     }
 
     Connections {
-        target: networkBackend
+        target: bluetoothBackend
 
         function onNetworks_ready(networksJson) {
             var netList = JSON.parse(networksJson);
@@ -33,7 +33,7 @@ Item {
             currentIcon.text = icon;
             currentSsid.text = "Conectado a: " + ssid;
             currentConnectedSsid = ssid;
-            currentIp.text = "Dirección IP: " + ip;
+            currentIp.text = "Dirección MAC: " + ip;
         }
 
         function onConnect_result(success, message) {
@@ -74,7 +74,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 5
                     Text { id: currentSsid; text: "Cargando..."; color: "#FFFFFF"; font.pixelSize: 18; font.bold: true }
-                    Text { id: currentIp; text: "Dirección IP: --"; color: "#8a8d94"; font.pixelSize: 14 }
+                    Text { id: currentIp; text: "Dirección MAC: --"; color: "#8a8d94"; font.pixelSize: 14 }
                 }
                 
                 Button {
