@@ -9,6 +9,7 @@ Item {
 
     property string selectedNetwork: ""
     property string currentConnectedSsid: ""
+    property string currentConnectedMAC: ""
     property bool isScanning: true
 
     Component.onCompleted: {
@@ -29,11 +30,12 @@ Item {
             isScanning = false;
         }
 
-        function onConnection_status(icon, ssid, ip) {
+        function onConnection_status(icon, ssid, mac) {
             currentIcon.text = icon;
             currentSsid.text = "Conectado a: " + ssid;
             currentConnectedSsid = ssid;
-            currentIp.text = "Dirección MAC: " + ip;
+            currentIp.text = "Dirección MAC: " + mac;
+            currentConnectedMAC = mac;
         }
 
         function onConnect_result(success, message) {
@@ -67,6 +69,7 @@ Item {
                     id: currentIcon
                     text: "🚫"
                     font.pixelSize: 40
+                    font.family: "Noto Color Emoji"
                     color: "#fc724f"
                 }
 
@@ -78,14 +81,14 @@ Item {
                 }
                 
                 Button {
-                    text: (currentConnectedSsid !== "Sin conexión" && currentConnectedSsid !== "Error de red") ? "Olvidar" : "Desconectar"
+                    text: (currentConnectedSsid !== "Sin conexión" && currentConnectedSsid !== "Error de red") ? "Desconectar" : "Desconectar"
                     background: Rectangle { color: "#331f1f"; radius: 8; border.color: "#501617"; border.width: 2 }
                     contentItem: Text { text: parent.text; color: "#fc724f"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
                     Layout.preferredWidth: 110
                     Layout.preferredHeight: 40
                     onClicked: {
-                        if (text === "Olvidar") {
-                            networkBackend.forget_network(currentConnectedSsid)
+                        if (text === "Desconectar") {
+                            bluetoothBackend.forget_network(currentConnectedMAC)
                         } else {
                             networkBackend.disconnect_network()
                         }

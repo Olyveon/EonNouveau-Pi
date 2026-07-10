@@ -20,36 +20,25 @@ class BluetoothBackend(QObject):
 
     def _get_status(self):
         try:
-            # nmcli -t -f NAME,TYPE,DEVICE connection show --active
-            out = subprocess.check_output(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active"], text=True)
+            # bluetoothctl devices Connected
+            out = subprocess.check_output(["bluetoothctl", "devices", "Connected"], text=True)
+            if not out.strip():
+                name = "Sin conexión"
+                mac = "---.---.---.---"
+                icon = "🚫"
+                
             lines = out.strip().split('\n')
-            
-            ssid = "Sin conexión"
-            ip = "---.---.---.---"
-            icon = "🚫"
             
             for line in lines:
                 if not line: continue
-                parts = line.split(':')
+                parts = line.split(' ')
                 if len(parts) >= 3:
-                    name, net_type, dev = parts[0], parts[1], parts[2]
+                    mac = parts[1]
+                    name = " ".join(parts[2:])  # Combina el resto de las partes como nombre
+                    icon = "🎧"
                     
-                    # Verificamos si es inalámbrica o de red por cable
-                    if net_type in ['802-11-wireless', '802-3-ethernet']:
-                        ssid = name
-                        icon = "🌐" if net_type == '802-3-ethernet' else "📶"
-                        
-                        # Sacamos la IP de esa interfaz específica
-                        try:
-                            ip_out = subprocess.check_output(["nmcli", "-t", "-f", "IP4.ADDRESS", "device", "show", dev], text=True)
-                            ip_lines = ip_out.strip().split('\n')
-                            if ip_lines and ip_lines[0]:
-                                ip = ip_lines[0].replace('IP4.ADDRESS[1]:', '').split('/')[0]
-                        except:
-                            ip = "Obteniendo..."
-                        break
             #ssid = "Prueba"
-            self.connection_status.emit(icon, ssid, ip)
+            self.connection_status.emit(icon, name, mac)
         except Exception as e:
             self.connection_status.emit("🚫", "Error de red", str(e))
 
@@ -133,7 +122,7 @@ class BluetoothBackend(QObject):
 
     def _forget(self, ssid):
         try:
-            subprocess.run(["nmcli", "connection", "delete", ssid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["bluetoothctl", "disconnect", ssid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self._get_status()
             self._scan() # Refrescar lista para actualizar el estado "known"
         except:
