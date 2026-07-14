@@ -3,106 +3,100 @@ import QtQuick.Controls
 import QtQuick.Layouts
 
 Item {
-    id: networkRoot
+    id: bluetoothRoot
+
+    // Keep raw device data here — source of truth
+    property var deviceMap: ({})
+
+    ListModel {
+        id: deviceModel
+    }
+
+    function statusPriority(status) {
+        switch (status) {
+            case "connected": return 0
+            case "paired":    return 1
+            default:          return 2  // "scanned"
+        }
+    }
+
+    function rebuildModel() {
+        var devices = Object.values(deviceMap)
+        devices.sort(function(a, b) {
+            var pa = statusPriority(a.status)
+            var pb = statusPriority(b.status)
+            if (pa !== pb) return pa - pb
+            // Optional secondary sort: strongest signal first within same status
+            return b.rssi - a.rssi
+        })
+        deviceModel.clear()
+        for (var i = 0; i < devices.length; i++) {
+            deviceModel.append(devices[i])
+        }
+    }
+
     Layout.fillWidth: true
     Layout.fillHeight: true
 
-    property string selectedNetwork: ""
-    property string currentConnectedSsid: ""
-    property string currentConnectedMAC: ""
-    property bool isScanning: true
-
     Component.onCompleted: {
         // Al cargar la pestaña, pedimos a Python que busque los dispositivos
-        bluetoothBackend.request_status()
-        bluetoothBackend.scan_networks()
+        deviceMap = {}
+        deviceModel.clear()
+        bluetoothBackend.start_scan()
     }
 
     Connections {
         target: bluetoothBackend
 
-        function onNetworks_ready(networksJson) {
-            var netList = JSON.parse(networksJson);
-            networkModel.clear();
-            for (var i = 0; i < netList.length; i++) {
-                networkModel.append(netList[i]);
+        function onPairing_finished(mac, status) {
+        if (deviceMap[mac]) {
+            deviceMap[mac].status = status === "paired" ? "paired" : "scanned"
+            rebuildModel()
             }
-            isScanning = false;
+        }
+        
+
+        function onConnection_changed(mac, status) {
+            if (deviceMap[mac]) {
+                deviceMap[mac].status = status === "connected" ? "connected"
+                                    : (deviceMap[mac].status === "connected" ? "paired" : deviceMap[mac].status)
+                rebuildModel()
+            }
         }
 
-        function onConnection_status(icon, ssid, mac) {
-            currentIcon.text = icon;
-            currentSsid.text = "Conectado a: " + ssid;
-            currentConnectedSsid = ssid;
-            currentIp.text = "Dirección MAC: " + mac;
-            currentConnectedMAC = mac;
+        function onDevice_found(jsonStr) {
+            var d = JSON.parse(jsonStr)
+            deviceMap[d.mac] = d
+            rebuildModel()
         }
 
-        function onConnect_result(success, message) {
-            // Mostrar error o éxito
-            if (!success) {
-                errorTextPopup.text = message;
-                errorPopup.open();
-            }
+        function onDevices_ready(jsonStr) {
+            //console.log("Scan finished:", jsonStr)
+        }
+
+        function onScan_error(msg) {
+            console.log("Bluetooth scan error:", msg)
         }
     }
 
+    // On new scan:
+    function startScan() {
+        deviceMap = {}
+        deviceModel.clear()
+        bluetoothBackend.start_scan()
+    }
+
     ColumnLayout {
-        anchors.fill: parent
+        anchors.fill: parent 
         spacing: 20
 
-        // Current Connection Info
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 100
-            color: "#191723"
-            radius: 10
-            border.color: "#25282c"
-            border.width: 2
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 20
-                spacing: 20
-
-                Text {
-                    id: currentIcon
-                    text: "🚫"
-                    font.pixelSize: 40
-                    font.family: "Noto Color Emoji"
-                    color: "#fc724f"
-                }
-
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 5
-                    Text { id: currentSsid; text: "Cargando..."; color: "#FFFFFF"; font.pixelSize: 18; font.bold: true }
-                    Text { id: currentIp; text: "Dirección MAC: --"; color: "#8a8d94"; font.pixelSize: 14 }
-                }
-                
-                Button {
-                    text: (currentConnectedSsid !== "Sin conexión" && currentConnectedSsid !== "Error de red") ? "Desconectar" : "Desconectar"
-                    background: Rectangle { color: "#331f1f"; radius: 8; border.color: "#501617"; border.width: 2 }
-                    contentItem: Text { text: parent.text; color: "#fc724f"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    Layout.preferredWidth: 110
-                    Layout.preferredHeight: 40
-                    onClicked: {
-                        if (text === "Desconectar") {
-                            bluetoothBackend.forget_network(currentConnectedMAC)
-                        } else {
-                            networkBackend.disconnect_network()
-                        }
-                    }
-                }
-            }
-        }
 
         RowLayout {
             Layout.fillWidth: true
             Layout.topMargin: 10
             
             Text {
-                text: isScanning ? "Buscando Redes..." : "Dispositivos Disponibles"
+                text: "Dispositivos Disponibles"
                 color: "#FFFFFF"
                 font.pixelSize: 22
                 font.bold: true
@@ -113,28 +107,24 @@ Item {
                 text: "↻ Refrescar"
                 background: Rectangle { color: "transparent" }
                 contentItem: Text { text: parent.text; color: "#fc724f"; font.pixelSize: 16 }
-                onClicked: {
-                    isScanning = true;
-                    networkModel.clear();
-                    networkBackend.scan_networks();
-                }
+                onClicked: startScan()
             }
         }
 
-        // Available Networks List
+        // Available Devices List
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             color: "transparent"
 
             ListView {
-                id: networksList
+                id: devicesList
                 anchors.fill: parent
                 clip: true
                 spacing: 12
                 ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
 
-                model: ListModel { id: networkModel }
+                model: deviceModel 
 
                 delegate: Rectangle {
                     width: ListView.view.width
@@ -149,15 +139,18 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            selectedNetwork = model.ssid
-                            if (model.known) {
-                                // Si ya se conoce, conectar directamente usando el perfil guardado
-                                networkBackend.connect_network(model.ssid, "")
-                            } else if (model.secured) {
-                                passwordInput.text = ""
-                                passwordPopup.open()
-                            } else {
-                                networkBackend.connect_network(model.ssid, "")
+                            
+                            if (model.status == "paired") {
+                                // Si esta emparejado, tratar de conectarse
+                                print(model.mac)
+                                bluetoothBackend.connect_device(model.mac)
+                            } else if (model.status == "connected") {
+                                // Si esta conectado se desconecta
+                                bluetoothBackend.disconnect_device(model.mac)
+                                
+                            } else if (model.status == "scanned"){
+                                // Si no esta emparajeado, tratar de emparejarse
+                                bluetoothBackend.pair_device(model.mac)
                             }
                         }
                     }
@@ -167,156 +160,62 @@ Item {
                         anchors.margins: 15
                         spacing: 15
 
-                        Text {
-                            text: model.known ? "⭐" : (model.secured ? "🔒" : "🔓")
-                            font.pixelSize: 20
-                            color: model.known ? "#fc724f" : "#8a8d94"
+                        ColumnLayout {
+                            spacing: 2
+                            Label {
+                                text: model.name
+                                font.bold: true
+                                color: "white"
+                            }
+                            Label {
+                                text: model.mac 
+                                font.pixelSize: 11
+                                color: "white"
+                                opacity: 0.6
+                            }
                         }
 
-                        Text {
-                            text: model.ssid
-                            color: "#FFFFFF"
-                            font.pixelSize: 18
-                            Layout.fillWidth: true
-                        }
+                        Item { Layout.fillWidth: true }
 
-                        Text {
-                            text: "Señal: " + model.strength
-                            color: "#8a8d94"
-                            font.pixelSize: 14
+                        Label {
+                            text: model.status === "connected" ? "Conectado"
+                                : model.status === "paired" ? "Emparejado"
+                                : "Detectado"
+                            color: model.status === "connected" ? "green"
+                                : model.status === "paired" ? "orange"
+                                :"gray"
                         }
+                        
+
+                        
                         
                         Button {
                             id: connectBtn
-                            text: model.known ? "Olvidar" : "Conectar"
+                            text: model.status === "scanned" ? "Emparejar" : "Olvidar"
                             background: Rectangle { 
                                 color: "#191723"
                                 radius: 5 
-                                border.color: model.known ? "#8a8d94" : "#fc724f"
-                                border.width: 1 
+                                border.color: model.status === "scanned" ? "#fc724f" : "#8a8d94" 
+                                border.width: 1.1 
                             }
                             contentItem: Text { 
                                 text: connectBtn.text
-                                color: model.known ? "#8a8d94" : "#fc724f"
+                                color: model.status === "scanned" ? "#fc724f" : "#8a8d94" 
                                 horizontalAlignment: Text.AlignHCenter 
                                 verticalAlignment: Text.AlignVCenter 
                             }
                             Layout.preferredWidth: 90
                             Layout.preferredHeight: 35
                             onClicked: {
-                                selectedNetwork = model.ssid
-                                if (model.known) {
-                                    networkBackend.forget_network(model.ssid)
-                                } else if (model.secured) {
-                                    passwordInput.text = ""
-                                    passwordPopup.open()
+                                if (model.status == "scanned") {
+                                    // Si no esta emparajeado, tratar de emparejarse
+                                    bluetoothBackend.pair_device(model.mac)
                                 } else {
-                                    networkBackend.connect_network(model.ssid, "")
+                                    // Si esta conectado o emperajedo se olvida
+                                    bluetoothBackend.forget_device(model.mac) 
                                 }
                             }
                         }
-                    }
-                }
-            }
-        }
-    }
-
-    // Popup para ingresar contraseña
-    Popup {
-        id: passwordPopup
-        width: 800
-        height: 230
-        x: Math.round((parent.width - width) / 2)
-        y: -20 // Posicionado arriba para no estorbar con el teclado virtual
-        z: 1
-        modal: true
-        focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-
-        background: Rectangle {
-            color: "#0b0d13"
-            radius: 15
-            border.color: "#fc724f"
-            border.width: 2
-        }
-
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 25
-            spacing: 15
-
-            Text {
-                text: "Conectar a " + selectedNetwork
-                color: "#FFFFFF"
-                font.pixelSize: 20
-                font.bold: true
-                Layout.alignment: Qt.AlignHCenter
-            }
-
-            TextField {
-                id: passwordInput
-                Layout.fillWidth: true
-                Layout.preferredHeight: 50
-                placeholderText: "Contraseña de red"
-                echoMode: showPassword ? TextInput.Normal : TextInput.Password
-                color: "#FFFFFF"
-                font.pixelSize: 16
-                placeholderTextColor: "#8a8d94"
-                rightPadding: 50
-                
-                property bool showPassword: false
-
-                background: Rectangle {
-                    color: "#191723"
-                    radius: 8
-                    border.color: passwordInput.activeFocus ? "#fc724f" : "#25282c"
-                    border.width: 2
-                }
-
-                // Botón de ojo para mostrar/ocultar contraseña
-                Text {
-                    id: eyeIcon
-                    anchors.right: parent.right
-                    anchors.rightMargin: 15
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: passwordInput.showPassword ? "ʘ" : "◡"
-                    font.pixelSize: 22
-                    color: passwordInput.showPassword ? "#fc724f" : "#8a8d94"
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: passwordInput.showPassword = !passwordInput.showPassword
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignRight
-                spacing: 15
-
-                Button {
-                    text: "Cancelar"
-                    Layout.preferredWidth: 100
-                    Layout.preferredHeight: 45
-                    background: Rectangle { color: "transparent"; border.color: "#8a8d94"; border.width: 2; radius: 8 }
-                    contentItem: Text { text: parent.text; color: "#8a8d94"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    onClicked: {
-                        passwordInput.text = ""
-                        passwordPopup.close()
-                    }
-                }
-
-                Button {
-                    text: "Conectar"
-                    Layout.preferredWidth: 120
-                    Layout.preferredHeight: 45
-                    background: Rectangle { color: "#fc724f"; radius: 8 }
-                    contentItem: Text { text: parent.text; color: "#0b0d13"; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                    onClicked: {
-                        networkBackend.connect_network(selectedNetwork, passwordInput.text)
-                        passwordInput.text = ""
-                        passwordPopup.close()
                     }
                 }
             }
